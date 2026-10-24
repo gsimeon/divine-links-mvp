@@ -17,19 +17,28 @@ Because telecom supplier/reseller partnerships are not yet secured, the MVP coll
 ## Included
 
 - Bright responsive homepage with telecom, networking and broadband enquiry paths.
-- Accessible enquiry form with server-side schema validation, a honeypot, basic process-local rate limiting, and clear failure states.
-- API endpoint that refuses to pretend it saved anything when environment configuration is missing.
-- SQL migrations for enquiries, lifecycle statuses, indexes, restrictive RLS grants and an audit-event table.
-- Initial admin enquiry desk at `/admin` with Supabase password sign-in, server-side `app_metadata.role = admin` authorization, status changes and internal notes.
-- `.env.example`, basic scripts and setup notes.
+- Mobile slide-out navigation drawer with smooth backdrop blur, keyboard dismissal, and responsive header.
+- Accessible enquiry form with server-side schema validation, a honeypot, process-local rate limiting, and copyable reference card on success.
+- Dedicated compliance pages:
+  - `/privacy`: Comprehensive UK GDPR, Data Protection Act 2018, and NDPA aligned notice with data subject rights.
+  - `/terms`: Clear service terms clarifying the non-binding, enquiry-first model.
+  - `/cookies`: Transparency report for technical cookies and zero-tracker commitment.
+  - Cookie & privacy consent banner with persistent acknowledgement state.
+- Enhanced Admin Enquiry Desk at `/admin` with:
+  - Supabase Auth sign-in with server-enforced `app_metadata.role = admin`.
+  - Live search across reference, customer name, email, phone, and area.
+  - Status and service filters, real-time stat counters, and one-click CSV export.
+  - Status transitions and internal notes synced with append-only audit trail (`enquiry_audit_events`).
+- Automated Vitest test suite (`npm test`) covering schema validation, rate limiting, and API handlers.
+- SQL migrations for enquiries, lifecycle statuses, indexes, restrictive RLS grants and audit events.
+- `.env.example`, TypeScript configuration, and ESLint configuration.
 
 ## Not included yet
 
-- Authenticated customer accounts or admin dashboard.
-- Email/SMS notifications.
-- Payment processing, live product pricing, supplier API, telecom fulfilment, partner coverage checks.
-- Confirmed legal/privacy policy, company contact details, brand assets or service-level promises.
-- Deployment, live database connection, automated tests or production security review.
+- Public customer accounts or self-service billing (deferred by design).
+- Email/SMS notification dispatch (feature flagged).
+- Payment processing, live supplier APIs, carrier wholesale feeds (enquiry-first model).
+- Production cloud deployment or custom domain DNS.
 
 ## Local setup
 
