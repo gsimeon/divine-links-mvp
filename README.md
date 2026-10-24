@@ -17,6 +17,10 @@ Because telecom supplier/reseller partnerships are not yet secured, the MVP coll
 ## Included
 
 - Bright responsive homepage with telecom, networking and broadband enquiry paths.
+- Interactive Regional Coverage Explorer with feasibility metrics across Lagos, Abuja, Port Harcourt, and Ibadan.
+- Interactive Solution & Bandwidth Estimator calculating concurrency needs and hardware recommendations.
+- Customer Enquiry Status Tracker at `/track` allowing clients to verify progress with their unique reference code and email.
+- Comprehensive FAQ accordion addressing feasibility, quotations, and deployment processes.
 - Mobile slide-out navigation drawer with smooth backdrop blur, keyboard dismissal, and responsive header.
 - Accessible enquiry form with server-side schema validation, a honeypot, process-local rate limiting, and copyable reference card on success.
 - Dedicated compliance pages:
@@ -29,14 +33,16 @@ Because telecom supplier/reseller partnerships are not yet secured, the MVP coll
   - Live search across reference, customer name, email, phone, and area.
   - Status and service filters, real-time stat counters, and one-click CSV export.
   - Status transitions and internal notes synced with append-only audit trail (`enquiry_audit_events`).
-- Automated Vitest test suite (`npm test`) covering schema validation, rate limiting, and API handlers.
+  - Outbound notification audit log modal (`/api/admin/notifications`).
+  - GDPR Article 17 "Right to Erasure" / PII Anonymization tool (`/api/admin/enquiries/gdpr`).
+- Automated Vitest test suite (`npm test`) with 34 tests across 6 test suites covering schemas, rate limiting, notifications, enquiry creation, and tracking API handlers.
 - SQL migrations for enquiries, lifecycle statuses, indexes, restrictive RLS grants and audit events.
 - `.env.example`, TypeScript configuration, and ESLint configuration.
 
 ## Not included yet
 
 - Public customer accounts or self-service billing (deferred by design).
-- Email/SMS notification dispatch (feature flagged).
+- Live email/SMS webhook triggers (modular notification service is simulated and feature-flag ready).
 - Payment processing, live supplier APIs, carrier wholesale feeds (enquiry-first model).
 - Production cloud deployment or custom domain DNS.
 
