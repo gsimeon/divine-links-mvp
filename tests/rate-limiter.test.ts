@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { rateLimited, resetRateLimits, RATE_LIMIT, RATE_WINDOW_MS } from "@/app/api/enquiries/route";
+import { rateLimited, resetRateLimits, RATE_LIMIT, RATE_WINDOW_MS } from "@/lib/rate-limiter";
 
 describe("Enquiry Rate Limiter", () => {
   beforeEach(() => {

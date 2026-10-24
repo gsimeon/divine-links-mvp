@@ -1,39 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { z } from "zod";
 import { randomUUID } from "node:crypto";
+import { enquirySchema } from "@/lib/schemas";
+import { rateLimited } from "@/lib/rate-limiter";
+import { sendCustomerEnquiryConfirmation, sendAdminEnquiryAlert } from "@/lib/notifications";
 
 export const runtime = "nodejs";
-
-export const enquirySchema = z.object({
-  fullName: z.string().trim().min(2).max(160),
-  email: z.email().max(254),
-  phone: z.string().trim().min(7).max(40),
-  location: z.string().trim().min(2).max(160),
-  service: z.enum(["telecom", "sim", "networking", "broadband", "other"]),
-  audience: z.enum(["individual", "business"]).default("individual"),
-  details: z.string().trim().min(10).max(2000),
-  consent: z.literal("yes"),
-  website: z.string().optional()
-});
-
-const windowMap = new Map<string, { count: number; start: number }>();
-export const RATE_WINDOW_MS = 10 * 60 * 1000;
-export const RATE_LIMIT = 5;
-
-export function rateLimited(ip: string, now = Date.now()) {
-  const entry = windowMap.get(ip);
-  if (!entry || now - entry.start > RATE_WINDOW_MS) {
-    windowMap.set(ip, { count: 1, start: now });
-    return false;
-  }
-  entry.count += 1;
-  return entry.count > RATE_LIMIT;
-}
-
-export function resetRateLimits() {
-  windowMap.clear();
-}
 
 export async function POST(request: NextRequest) {
   const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
@@ -89,6 +61,27 @@ export async function POST(request: NextRequest) {
     console.error("Enquiry persistence failed", { code: error.code });
     return NextResponse.json({ error: "We couldn’t save your enquiry just now. Please try again later." }, { status: 502 });
   }
+
+  // Asynchronous notification dispatch (non-blocking for fast response)
+  void sendCustomerEnquiryConfirmation({
+    reference,
+    fullName: parsed.data.fullName,
+    email: parsed.data.email,
+    phone: parsed.data.phone,
+    service: parsed.data.service,
+    location: parsed.data.location,
+    details: parsed.data.details
+  });
+
+  void sendAdminEnquiryAlert({
+    reference,
+    fullName: parsed.data.fullName,
+    email: parsed.data.email,
+    phone: parsed.data.phone,
+    service: parsed.data.service,
+    location: parsed.data.location,
+    details: parsed.data.details
+  });
 
   return NextResponse.json({ ok: true, reference }, { status: 201 });
 }

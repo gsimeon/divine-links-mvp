@@ -41,10 +41,12 @@ export function Header() {
           <Brand />
 
           {/* Desktop Navigation */}
-          <nav className="hidden items-center gap-8 text-sm font-semibold text-divine-muted md:flex" aria-label="Main navigation">
+          <nav className="hidden items-center gap-7 text-sm font-semibold text-divine-muted md:flex" aria-label="Main navigation">
             <Link className="transition hover:text-divine-blue" href="/#services">Services</Link>
+            <Link className="transition hover:text-divine-blue" href="/#coverage">Coverage</Link>
             <Link className="transition hover:text-divine-blue" href="/#how-it-works">How it works</Link>
             <Link className="transition hover:text-divine-blue" href="/#business">For business</Link>
+            <Link className="transition hover:text-divine-blue" href="/#faq">FAQ</Link>
             <Link className="transition hover:text-divine-blue" href="/privacy">Privacy</Link>
           </nav>
 
@@ -119,6 +121,13 @@ export function Header() {
                   Our Services
                 </Link>
                 <Link
+                  href="/#coverage"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-xl px-3 py-2.5 transition hover:bg-divine-ice hover:text-divine-blue"
+                >
+                  Network Coverage
+                </Link>
+                <Link
                   href="/#how-it-works"
                   onClick={() => setMobileMenuOpen(false)}
                   className="rounded-xl px-3 py-2.5 transition hover:bg-divine-ice hover:text-divine-blue"
@@ -131,6 +140,13 @@ export function Header() {
                   className="rounded-xl px-3 py-2.5 transition hover:bg-divine-ice hover:text-divine-blue"
                 >
                   For Business
+                </Link>
+                <Link
+                  href="/#faq"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-xl px-3 py-2.5 transition hover:bg-divine-ice hover:text-divine-blue"
+                >
+                  FAQ
                 </Link>
                 <Link
                   href="/privacy"

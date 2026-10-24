@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { POST, resetRateLimits } from "@/app/api/enquiries/route";
+import { POST } from "@/app/api/enquiries/route";
+import { resetRateLimits } from "@/lib/rate-limiter";
 import { NextRequest } from "next/server";
 
 describe("POST /api/enquiries Route Handler", () => {

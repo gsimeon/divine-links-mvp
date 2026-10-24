@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { statusSchema, updateSchema } from "@/app/api/admin/enquiries/route";
+import { statusSchema, updateSchema } from "@/lib/schemas";
 
 describe("Admin Schemas", () => {
   describe("statusSchema", () => {

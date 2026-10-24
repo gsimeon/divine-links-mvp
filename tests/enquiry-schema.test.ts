@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { enquirySchema } from "@/app/api/enquiries/route";
+import { enquirySchema } from "@/lib/schemas";
 
 describe("Enquiry Validation Schema", () => {
   const validPayload = {

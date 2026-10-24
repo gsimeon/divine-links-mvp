@@ -2,6 +2,8 @@ import Link from "next/link";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { ServiceCard } from "@/components/service-card";
+import { CoverageChecker } from "@/components/coverage-checker";
+import { FAQSection } from "@/components/faq-section";
 
 function NetworkIllustration() {
   return (
@@ -117,6 +119,9 @@ export default function HomePage() {
             </div>
           </div>
         </section>
+
+        <CoverageChecker />
+        <FAQSection />
       </main>
       <Footer />
     </>

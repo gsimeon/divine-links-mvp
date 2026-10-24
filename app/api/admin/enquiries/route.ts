@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { z } from "zod";
+import { statusSchema, updateSchema } from "@/lib/schemas";
+import { sendStatusUpdateNotification } from "@/lib/notifications";
 
 export const runtime = "nodejs";
-
-export const statusSchema = z.enum([
-  "submitted", "under_review", "awaiting_customer", "awaiting_partner",
-  "in_progress", "completed", "cancelled", "unable_to_fulfil"
-]);
 
 function clients() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -77,13 +73,6 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ enquiries: data ?? [] });
 }
 
-export const updateSchema = z.object({
-  id: z.uuid(),
-  status: statusSchema,
-  internalNotes: z.string().max(4000).optional(),
-  assignedTo: z.uuid().nullable().optional()
-});
-
 export async function PATCH(request: NextRequest) {
   const auth = await requireAdmin(request);
   if ("error" in auth) return auth.error;
@@ -113,7 +102,7 @@ export async function PATCH(request: NextRequest) {
   const { data, error } = await auth.client.from("enquiries")
     .update(update)
     .eq("id", parsed.data.id)
-    .select("id, reference, status, internal_notes, assigned_to, updated_at")
+    .select("id, reference, full_name, email, status, internal_notes, assigned_to, updated_at")
     .maybeSingle();
 
   if (error) {
@@ -133,6 +122,15 @@ export async function PATCH(request: NextRequest) {
   if (auditError) {
     console.error("Admin audit event failed", { code: auditError.code, enquiryId: data.id });
   }
+
+  // Asynchronous status update notification
+  void sendStatusUpdateNotification({
+    reference: data.reference,
+    fullName: data.full_name,
+    email: data.email,
+    newStatus: data.status,
+    note: parsed.data.internalNotes?.trim() || null
+  });
 
   return NextResponse.json({ enquiry: data, auditLogged: !auditError });
 }
