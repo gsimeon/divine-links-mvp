@@ -30,6 +30,13 @@ export const updateSchema = z.object({
   assignedTo: z.uuid().nullable().optional()
 });
 
+export const trackSchema = z.object({
+  reference: z.string().trim().min(5).max(30),
+  email: z.email().max(254)
+});
+
 export type EnquiryInput = z.infer<typeof enquirySchema>;
 export type AdminUpdateInput = z.infer<typeof updateSchema>;
 export type EnquiryStatus = z.infer<typeof statusSchema>;
+export type TrackInput = z.infer<typeof trackSchema>;
+

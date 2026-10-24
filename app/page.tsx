@@ -3,6 +3,7 @@ import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { ServiceCard } from "@/components/service-card";
 import { CoverageChecker } from "@/components/coverage-checker";
+import { SolutionCalculator } from "@/components/solution-calculator";
 import { FAQSection } from "@/components/faq-section";
 
 function NetworkIllustration() {
@@ -121,6 +122,7 @@ export default function HomePage() {
         </section>
 
         <CoverageChecker />
+        <SolutionCalculator />
         <FAQSection />
       </main>
       <Footer />

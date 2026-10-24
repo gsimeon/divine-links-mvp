@@ -41,13 +41,13 @@ export function Header() {
           <Brand />
 
           {/* Desktop Navigation */}
-          <nav className="hidden items-center gap-7 text-sm font-semibold text-divine-muted md:flex" aria-label="Main navigation">
+          <nav className="hidden items-center gap-6 text-sm font-semibold text-divine-muted md:flex" aria-label="Main navigation">
             <Link className="transition hover:text-divine-blue" href="/#services">Services</Link>
             <Link className="transition hover:text-divine-blue" href="/#coverage">Coverage</Link>
+            <Link className="transition hover:text-divine-blue" href="/#calculator">Calculator</Link>
             <Link className="transition hover:text-divine-blue" href="/#how-it-works">How it works</Link>
-            <Link className="transition hover:text-divine-blue" href="/#business">For business</Link>
             <Link className="transition hover:text-divine-blue" href="/#faq">FAQ</Link>
-            <Link className="transition hover:text-divine-blue" href="/privacy">Privacy</Link>
+            <Link className="transition hover:text-divine-blue" href="/track">Track</Link>
           </nav>
 
           <div className="hidden items-center gap-4 md:flex">
@@ -126,6 +126,20 @@ export function Header() {
                   className="rounded-xl px-3 py-2.5 transition hover:bg-divine-ice hover:text-divine-blue"
                 >
                   Network Coverage
+                </Link>
+                <Link
+                  href="/#calculator"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-xl px-3 py-2.5 transition hover:bg-divine-ice hover:text-divine-blue"
+                >
+                  Solution Calculator
+                </Link>
+                <Link
+                  href="/track"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-xl px-3 py-2.5 transition hover:bg-divine-ice hover:text-divine-blue"
+                >
+                  Track Enquiry
                 </Link>
                 <Link
                   href="/#how-it-works"

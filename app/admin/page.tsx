@@ -22,6 +22,16 @@ type Enquiry = {
   updated_at?: string;
 };
 
+type NotificationItem = {
+  id: string;
+  channel: string;
+  recipient: string;
+  subject?: string;
+  body: string;
+  simulated: boolean;
+  timestamp: string;
+};
+
 const statuses = [
   "submitted",
   "under_review",
@@ -74,6 +84,10 @@ export default function AdminPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
+  // Notification stream drawer
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+
   useEffect(() => {
     const supabase = browserClient();
     setClient(supabase);
@@ -117,6 +131,21 @@ export default function AdminPage() {
     }
   }, [token, statusFilter, serviceFilter, searchQuery]);
 
+  const loadNotifications = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch("/api/admin/notifications", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setNotifications(data.notifications ?? []);
+      }
+    } catch {
+      // Ignored
+    }
+  }, [token]);
+
   useEffect(() => {
     if (token) {
       const timeout = setTimeout(() => {
@@ -157,11 +186,41 @@ export default function AdminPage() {
       if (!res.ok) {
         setMessage(body.error ?? "Unable to update enquiry.");
       } else {
-        setMessage(`Updated ${item.reference} (${status.replaceAll("_", " ")}).`);
+        setMessage(`Updated ${item.reference} (${status.replaceAll("_", " ")}). Outbound notification queued.`);
         await load(token);
       }
     } catch {
       setMessage("Could not connect to the admin service.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleGdprAnonymize(item: Enquiry) {
+    const confirmed = window.confirm(
+      `GDPR Right to Erasure: Are you sure you want to permanently anonymize all personal data for ${item.reference} (${item.full_name})? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setBusy(true);
+    try {
+      const res = await fetch("/api/admin/enquiries/gdpr", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ id: item.id, action: "anonymize" })
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setMessage(body.error ?? "Failed to anonymize enquiry.");
+      } else {
+        setMessage(body.message ?? "Enquiry anonymized.");
+        await load(token);
+      }
+    } catch {
+      setMessage("Could not connect to GDPR erasure service.");
     } finally {
       setBusy(false);
     }
@@ -214,7 +273,6 @@ export default function AdminPage() {
     document.body.removeChild(link);
   }
 
-  // Statistics calculation
   const stats = useMemo(() => {
     return {
       total: items.length,
@@ -239,17 +297,27 @@ export default function AdminPage() {
                 Enquiry Operations
               </h1>
               <p className="mt-2 text-sm text-divine-muted">
-                Review incoming requests, check carrier feasibility, update statuses, and log internal notes.
+                Review incoming requests, evaluate carrier feasibility, update statuses, and log internal notes.
               </p>
             </div>
 
             {token && (
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void loadNotifications();
+                    setNotificationsOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-divine-border bg-white px-4 py-2.5 text-xs font-bold text-divine-ink shadow-sm transition hover:border-divine-blue hover:text-divine-blue"
+                >
+                  <span>🔔</span> Outbound Log
+                </button>
                 <button
                   type="button"
                   onClick={handleExportCSV}
                   disabled={items.length === 0}
-                  className="inline-flex items-center gap-2 rounded-full border border-divine-border bg-white px-4 py-2.5 text-xs font-bold text-divine-ink shadow-sm transition hover:border-divine-blue hover:text-divine-blue disabled:opacity-40"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-divine-border bg-white px-4 py-2.5 text-xs font-bold text-divine-ink shadow-sm transition hover:border-divine-blue hover:text-divine-blue disabled:opacity-40"
                 >
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -259,7 +327,7 @@ export default function AdminPage() {
                 <button
                   type="button"
                   onClick={signOut}
-                  className="rounded-full border border-divine-border bg-white px-5 py-2.5 text-xs font-bold text-rose-600 transition hover:bg-rose-50"
+                  className="rounded-full border border-divine-border bg-white px-4 py-2.5 text-xs font-bold text-rose-600 transition hover:bg-rose-50"
                 >
                   Sign out
                 </button>
@@ -271,7 +339,7 @@ export default function AdminPage() {
             <div className="mx-auto max-w-lg rounded-3xl border border-divine-border bg-white p-6 shadow-soft sm:p-9">
               <h2 className="text-2xl font-extrabold text-divine-ink">Staff Sign In</h2>
               <p className="mt-1 text-xs text-divine-muted">
-                Server-side authorization is required. User accounts must have <code className="rounded bg-divine-ice px-1 py-0.5">app_metadata.role = admin</code>.
+                Server-side authorization is required. Accounts must possess <code className="rounded bg-divine-ice px-1 py-0.5">app_metadata.role = admin</code>.
               </p>
 
               <form onSubmit={signIn} className="mt-6 space-y-4">
@@ -404,7 +472,13 @@ export default function AdminPage() {
               ) : (
                 <div className="space-y-4">
                   {items.map(item => (
-                    <EnquiryCard key={item.id} item={item} busy={busy} onSave={saveEnquiry} />
+                    <EnquiryCard
+                      key={item.id}
+                      item={item}
+                      busy={busy}
+                      onSave={saveEnquiry}
+                      onAnonymize={handleGdprAnonymize}
+                    />
                   ))}
                 </div>
               )}
@@ -416,6 +490,54 @@ export default function AdminPage() {
               {message}
             </p>
           )}
+
+          {/* Outbound Notifications Modal / Drawer */}
+          {notificationsOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-divine-ink/50 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="relative w-full max-w-2xl max-h-[85vh] flex flex-col rounded-3xl border border-divine-border bg-white shadow-2xl overflow-hidden">
+                <div className="flex items-center justify-between border-b border-divine-border px-6 py-4">
+                  <div>
+                    <h2 className="text-lg font-black text-divine-ink">Outbound Notification Stream</h2>
+                    <p className="text-xs text-divine-muted">Simulated / Dispatched customer confirmations &amp; staff alerts</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setNotificationsOpen(false)}
+                    className="grid h-8 w-8 place-items-center rounded-xl border border-divine-border text-divine-muted hover:text-divine-ink"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                  {notifications.length === 0 ? (
+                    <p className="text-center text-xs text-divine-muted py-8">
+                      No notifications logged in this server session yet. Submitting or updating an enquiry triggers outbound events.
+                    </p>
+                  ) : (
+                    notifications.map(notif => (
+                      <div key={notif.id} className="rounded-2xl border border-divine-border bg-divine-ice/40 p-4 text-xs">
+                        <div className="flex items-center justify-between gap-2 border-b border-divine-border/60 pb-2 mb-2">
+                          <span className="font-bold text-divine-blue uppercase">
+                            {notif.channel} → {notif.recipient}
+                          </span>
+                          <span className="text-[11px] text-divine-muted">
+                            {new Date(notif.timestamp).toLocaleTimeString()}
+                          </span>
+                        </div>
+                        {notif.subject && (
+                          <p className="font-bold text-divine-ink mb-1.5">{notif.subject}</p>
+                        )}
+                        <pre className="whitespace-pre-wrap font-sans text-divine-muted text-[11px] leading-relaxed bg-white p-3 rounded-xl border border-divine-border/60">
+                          {notif.body}
+                        </pre>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </main>
       <Footer />
@@ -426,11 +548,13 @@ export default function AdminPage() {
 function EnquiryCard({
   item,
   busy,
-  onSave
+  onSave,
+  onAnonymize
 }: {
   item: Enquiry;
   busy: boolean;
   onSave: (item: Enquiry, status: string, notes: string) => Promise<void>;
+  onAnonymize: (item: Enquiry) => Promise<void>;
 }) {
   const [status, setStatus] = useState(item.status);
   const [notes, setNotes] = useState(item.internal_notes ?? "");
@@ -481,9 +605,19 @@ function EnquiryCard({
           </div>
         </div>
 
-        <time className="text-xs text-divine-muted">
-          {new Date(item.created_at).toLocaleString()}
-        </time>
+        <div className="flex flex-col items-end gap-2">
+          <time className="text-xs text-divine-muted">
+            {new Date(item.created_at).toLocaleString()}
+          </time>
+          <button
+            type="button"
+            onClick={() => void onAnonymize(item)}
+            className="text-[11px] font-semibold text-rose-600 hover:underline"
+            title="Erase and anonymize personal information under UK GDPR Article 17"
+          >
+            🔒 Anonymize PII
+          </button>
+        </div>
       </div>
 
       <div className="my-5 rounded-2xl bg-divine-ice/80 p-4 text-xs leading-relaxed text-divine-ink border border-divine-border/60">

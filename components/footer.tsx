@@ -20,8 +20,10 @@ export function Footer() {
           <p className="text-sm font-bold tracking-wide uppercase text-divine-ink">Explore</p>
           <div className="mt-4 flex flex-col gap-2.5 text-sm text-divine-muted">
             <Link className="transition hover:text-divine-blue" href="/#services">Our Services</Link>
+            <Link className="transition hover:text-divine-blue" href="/#coverage">Network Coverage</Link>
+            <Link className="transition hover:text-divine-blue" href="/#calculator">Solution Calculator</Link>
             <Link className="transition hover:text-divine-blue" href="/#how-it-works">How It Works</Link>
-            <Link className="transition hover:text-divine-blue" href="/#business">For Business</Link>
+            <Link className="transition hover:text-divine-blue" href="/track">Track Enquiry</Link>
             <Link className="transition hover:text-divine-blue" href="/enquire">Make an Enquiry</Link>
           </div>
         </div>
