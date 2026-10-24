@@ -79,16 +79,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, message: `Enquiry ${data.reference} successfully anonymized under GDPR.` });
   }
 
-  // Action: delete
+  // Action: delete (Hard erasure)
+  // 1. Delete associated audit events first to prevent foreign key constraint violation (ON DELETE RESTRICT)
+  const { error: auditDelError } = await auth.client
+    .from("enquiry_audit_events")
+    .delete()
+    .eq("enquiry_id", parsed.data.id);
+
+  if (auditDelError) {
+    console.error("GDPR audit events cleanup failed", { code: auditDelError.code, enquiryId: parsed.data.id });
+    return NextResponse.json({ error: "Unable to clear associated audit events before deletion." }, { status: 500 });
+  }
+
+  // 2. Delete the parent enquiry record
   const { error: delError } = await auth.client
     .from("enquiries")
     .delete()
     .eq("id", parsed.data.id);
 
   if (delError) {
-    console.error("GDPR deletion failed", delError);
+    console.error("GDPR enquiry deletion failed", { code: delError.code, enquiryId: parsed.data.id });
     return NextResponse.json({ error: "Unable to delete enquiry record." }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, message: "Enquiry record permanently deleted." });
+  return NextResponse.json({ ok: true, message: "Enquiry record and associated audit trail permanently deleted." });
 }

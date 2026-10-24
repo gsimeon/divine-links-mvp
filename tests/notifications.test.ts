@@ -72,20 +72,23 @@ describe("Notification Dispatch Service", () => {
     expect(history.length).toBe(1);
   });
 
-  it("generates status change update notification with optional staff notes", async () => {
+  it("generates status change update notification with customer message and tracking link", async () => {
     const payload = {
       reference: "DL-99887766",
       fullName: "Fatima Aliyu",
       email: "fatima@example.com",
       newStatus: "under_review",
-      note: "Survey engineer assigned to verify fibre junction on street."
+      customerMessage: "Our engineering team has scheduled a site survey for Monday."
     };
 
     const record = await sendStatusUpdateNotification(payload);
 
     expect(record.recipient).toBe("fatima@example.com");
     expect(record.subject).toContain("UNDER REVIEW");
-    expect(record.body).toContain("Survey engineer assigned");
+    expect(record.body).toContain("Our engineering team has scheduled a site survey");
+    expect(record.body).toContain("https://divinelinks.co/track");
+    // Verify privacy: should never leak private internal notes
+    expect(record.body).not.toContain("Staff Notes:");
 
     const history = getNotificationHistory();
     expect(history.length).toBe(1);

@@ -63,6 +63,20 @@ describe("Admin Schemas", () => {
       expect(result.success).toBe(true);
     });
 
+    it("accepts separate customerMessage without conflating with internalNotes", () => {
+      const withCustomerMsg = {
+        ...validUpdate,
+        internalNotes: "Internal operator note: discount offered",
+        customerMessage: "Your quotation has been prepared and sent to your email."
+      };
+      const result = updateSchema.safeParse(withCustomerMsg);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.internalNotes).toBe("Internal operator note: discount offered");
+        expect(result.data.customerMessage).toBe("Your quotation has been prepared and sent to your email.");
+      }
+    });
+
     it("rejects invalid assignedTo UUID", () => {
       const withInvalidAssignee = {
         ...validUpdate,

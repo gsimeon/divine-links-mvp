@@ -27,6 +27,7 @@ export const updateSchema = z.object({
   id: z.uuid(),
   status: statusSchema,
   internalNotes: z.string().max(4000).optional(),
+  customerMessage: z.string().max(2000).optional(),
   assignedTo: z.uuid().nullable().optional()
 });
 

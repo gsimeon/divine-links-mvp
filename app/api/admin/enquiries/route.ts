@@ -87,6 +87,22 @@ export async function PATCH(request: NextRequest) {
   const parsed = updateSchema.safeParse(raw);
   if (!parsed.success) return NextResponse.json({ error: "Please check the update fields." }, { status: 400 });
 
+  // 1. Fetch existing record to capture previous status and verify existence
+  const { data: existing, error: fetchError } = await auth.client
+    .from("enquiries")
+    .select("id, reference, full_name, email, status, internal_notes, assigned_to")
+    .eq("id", parsed.data.id)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error("Admin enquiry inspection failed", { code: fetchError.code });
+    return NextResponse.json({ error: "Unable to inspect enquiry before update." }, { status: 502 });
+  }
+  if (!existing) {
+    return NextResponse.json({ error: "Enquiry not found." }, { status: 404 });
+  }
+
+  // 2. Prepare update payload
   const update: Record<string, unknown> = {
     status: parsed.data.status
   };
@@ -99,38 +115,66 @@ export async function PATCH(request: NextRequest) {
     update.assigned_to = parsed.data.assignedTo;
   }
 
-  const { data, error } = await auth.client.from("enquiries")
+  // 3. Execute update
+  const { data: updated, error: updateError } = await auth.client
+    .from("enquiries")
     .update(update)
     .eq("id", parsed.data.id)
     .select("id, reference, full_name, email, status, internal_notes, assigned_to, updated_at")
     .maybeSingle();
 
-  if (error) {
-    console.error("Admin enquiry update failed", { code: error.code });
+  if (updateError || !updated) {
+    console.error("Admin enquiry update failed", { code: updateError?.code });
     return NextResponse.json({ error: "Unable to update this enquiry right now." }, { status: 502 });
   }
-  if (!data) return NextResponse.json({ error: "Enquiry not found." }, { status: 404 });
+
+  // 4. Record audit event with accurate state transitions (old_status & new_status)
+  const statusChanged = existing.status !== updated.status;
+  const notesChanged = existing.internal_notes !== updated.internal_notes;
+  const assignmentChanged = existing.assigned_to !== updated.assigned_to;
+
+  const eventType = statusChanged
+    ? "admin_status_change"
+    : notesChanged
+    ? "admin_note_update"
+    : assignmentChanged
+    ? "admin_assignment_update"
+    : "admin_update";
 
   const { error: auditError } = await auth.client.from("enquiry_audit_events").insert({
-    enquiry_id: data.id,
+    enquiry_id: updated.id,
     actor_user_id: auth.userId,
-    event_type: "admin_update",
-    new_status: data.status,
+    event_type: eventType,
+    old_status: existing.status,
+    new_status: updated.status,
     note: parsed.data.internalNotes?.trim() || null
   });
 
   if (auditError) {
-    console.error("Admin audit event failed", { code: auditError.code, enquiryId: data.id });
+    console.error("CRITICAL: Admin audit event write failed", {
+      code: auditError.code,
+      enquiryId: updated.id,
+      actorUserId: auth.userId,
+      oldStatus: existing.status,
+      newStatus: updated.status
+    });
   }
 
-  // Asynchronous status update notification
-  void sendStatusUpdateNotification({
-    reference: data.reference,
-    fullName: data.full_name,
-    email: data.email,
-    newStatus: data.status,
-    note: parsed.data.internalNotes?.trim() || null
-  });
+  // 5. Asynchronous customer notification (PRIVACY PRESERVED: internal notes are NEVER included)
+  if (statusChanged || parsed.data.customerMessage) {
+    void sendStatusUpdateNotification({
+      reference: updated.reference,
+      fullName: updated.full_name,
+      email: updated.email,
+      oldStatus: existing.status,
+      newStatus: updated.status,
+      customerMessage: parsed.data.customerMessage?.trim() || null
+    });
+  }
 
-  return NextResponse.json({ enquiry: data, auditLogged: !auditError });
+  return NextResponse.json({
+    enquiry: updated,
+    auditLogged: !auditError,
+    previousStatus: existing.status
+  });
 }

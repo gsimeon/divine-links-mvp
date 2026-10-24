@@ -19,7 +19,7 @@ export type StatusUpdateNotificationPayload = {
   phone?: string;
   oldStatus?: string;
   newStatus: string;
-  note?: string | null;
+  customerMessage?: string | null;
 };
 
 export type NotificationRecord = {
@@ -29,6 +29,7 @@ export type NotificationRecord = {
   subject?: string;
   body: string;
   simulated: boolean;
+  deliveryStatus?: "simulated" | "sent" | "failed";
   timestamp: string;
   metadata?: Record<string, unknown>;
 };
@@ -52,18 +53,60 @@ export function areNotificationsEnabled(): boolean {
 }
 
 /**
+ * Sends an email using a configured live email provider (e.g. Resend) or logs simulated execution.
+ */
+async function dispatchEmail(to: string, subject: string, body: string): Promise<"simulated" | "sent" | "failed"> {
+  const isEnabled = areNotificationsEnabled();
+  const resendApiKey = process.env.RESEND_API_KEY;
+
+  if (!isEnabled || !resendApiKey) {
+    return "simulated";
+  }
+
+  try {
+    const fromAddress = process.env.NOTIFICATIONS_FROM_EMAIL || "Divine Links <notifications@divinelinks.co>";
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${resendApiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: fromAddress,
+        to: [to],
+        subject,
+        text: body
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error("[Notification Dispatch Error] Resend HTTP failure", { status: response.status, details: errText });
+      return "failed";
+    }
+
+    return "sent";
+  } catch (error) {
+    console.error("[Notification Dispatch Error] Unhandled network failure", error);
+    return "failed";
+  }
+}
+
+/**
  * Dispatches an automated confirmation email to the customer who submitted an enquiry.
  */
 export async function sendCustomerEnquiryConfirmation(
   payload: EnquiryNotificationPayload
 ): Promise<NotificationRecord> {
-  const isEnabled = areNotificationsEnabled();
   const subject = `Enquiry Received: ${payload.reference} - Divine Links`;
   const body = `Hello ${payload.fullName},
 
 Thank you for contacting Divine Links. We have received your ${payload.service} enquiry for ${payload.location}.
 
 Your unique reference number is: ${payload.reference}
+
+Track your enquiry status online:
+https://divinelinks.co/track
 
 Next Steps:
 1. Our technical team is reviewing your specifications and evaluating local infrastructure availability.
@@ -74,13 +117,16 @@ Kind regards,
 The Divine Links Team
 https://divinelinks.co`;
 
+  const deliveryStatus = await dispatchEmail(payload.email, subject, body);
+
   const record: NotificationRecord = {
     id: `notif-${randomUUID()}`,
     channel: "email",
     recipient: payload.email,
     subject,
     body,
-    simulated: !isEnabled,
+    simulated: deliveryStatus === "simulated",
+    deliveryStatus,
     timestamp: new Date().toISOString(),
     metadata: {
       reference: payload.reference,
@@ -91,15 +137,13 @@ https://divinelinks.co`;
 
   notificationLog.push(record);
 
-  if (!isEnabled) {
+  if (deliveryStatus === "simulated") {
     console.info("[Notification Simulated - Customer Confirmation]", {
       recipient: payload.email,
       reference: payload.reference
     });
-    return record;
   }
 
-  // Hook for live provider (e.g. Resend, SendGrid, Postmark, AWS SES)
   return record;
 }
 
@@ -110,7 +154,6 @@ export async function sendAdminEnquiryAlert(
   payload: EnquiryNotificationPayload,
   adminEmail = "ops@divinelinks.co"
 ): Promise<NotificationRecord> {
-  const isEnabled = areNotificationsEnabled();
   const subject = `[New Enquiry] ${payload.reference} - ${payload.fullName} (${payload.service.toUpperCase()})`;
   const body = `New Enquiry Logged on Desk:
 
@@ -127,13 +170,16 @@ ${payload.details}
 Review in Admin Desk:
 http://localhost:3000/admin`;
 
+  const deliveryStatus = await dispatchEmail(adminEmail, subject, body);
+
   const record: NotificationRecord = {
     id: `notif-${randomUUID()}`,
     channel: "email",
     recipient: adminEmail,
     subject,
     body,
-    simulated: !isEnabled,
+    simulated: deliveryStatus === "simulated",
+    deliveryStatus,
     timestamp: new Date().toISOString(),
     metadata: {
       reference: payload.reference,
@@ -143,7 +189,7 @@ http://localhost:3000/admin`;
 
   notificationLog.push(record);
 
-  if (!isEnabled) {
+  if (deliveryStatus === "simulated") {
     console.info("[Notification Simulated - Admin Alert]", {
       recipient: adminEmail,
       reference: payload.reference
@@ -155,11 +201,11 @@ http://localhost:3000/admin`;
 
 /**
  * Dispatches an automated update notice to a customer when enquiry status changes.
+ * PRIVACY GUARANTEE: Internal staff notes are NEVER exposed in this notification.
  */
 export async function sendStatusUpdateNotification(
   payload: StatusUpdateNotificationPayload
 ): Promise<NotificationRecord> {
-  const isEnabled = areNotificationsEnabled();
   const humanStatus = payload.newStatus.replaceAll("_", " ").toUpperCase();
   const subject = `Update on your Enquiry ${payload.reference}: ${humanStatus}`;
   const body = `Hello ${payload.fullName},
@@ -167,12 +213,17 @@ export async function sendStatusUpdateNotification(
 We are writing to update you on the status of your Divine Links enquiry (Ref: ${payload.reference}).
 
 Current Status: ${humanStatus}
-${payload.note ? `\nStaff Notes:\n"${payload.note}"\n` : ""}
 
-If you have questions or wish to provide additional details, please reply to this notice or contact privacy@divinelinks.co.
+Track your progress live:
+https://divinelinks.co/track
+
+${payload.customerMessage ? `Message from our operations team:\n"${payload.customerMessage}"\n` : ""}
+If you have questions or wish to provide additional details, please contact us at ops@divinelinks.co.
 
 Best regards,
 The Divine Links Operations Desk`;
+
+  const deliveryStatus = await dispatchEmail(payload.email, subject, body);
 
   const record: NotificationRecord = {
     id: `notif-${randomUUID()}`,
@@ -180,17 +231,19 @@ The Divine Links Operations Desk`;
     recipient: payload.email,
     subject,
     body,
-    simulated: !isEnabled,
+    simulated: deliveryStatus === "simulated",
+    deliveryStatus,
     timestamp: new Date().toISOString(),
     metadata: {
       reference: payload.reference,
+      oldStatus: payload.oldStatus,
       newStatus: payload.newStatus
     }
   };
 
   notificationLog.push(record);
 
-  if (!isEnabled) {
+  if (deliveryStatus === "simulated") {
     console.info("[Notification Simulated - Status Change]", {
       recipient: payload.email,
       reference: payload.reference,

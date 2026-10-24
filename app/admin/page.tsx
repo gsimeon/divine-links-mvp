@@ -640,7 +640,12 @@ function EnquiryCard({
         </div>
 
         <div>
-          <label className="mb-1.5 block text-xs font-bold text-divine-muted">Internal Review Notes &amp; Follow-up</label>
+          <div className="mb-1.5 flex items-center justify-between">
+            <label className="text-xs font-bold text-divine-muted">Internal Staff Notes</label>
+            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+              🔒 Strictly Private to Staff
+            </span>
+          </div>
           <textarea
             rows={2}
             maxLength={4000}

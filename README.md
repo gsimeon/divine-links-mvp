@@ -58,14 +58,14 @@ Requirements: Node.js 20+ and npm.
 
 2. Copy `.env.example` to `.env.local`.
 3. Create a Supabase project only when ready, then fill in `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`. The public anon key is reserved for future browser-safe client features and is not currently required by this form route.
-4. Review and run migrations in order: `202610240001_create_enquiries.sql`, then `202610240002_create_enquiry_audit.sql`.
-5. Start the app:
+3. Review and run migrations in order: `202610240001_create_enquiries.sql`, `202610240002_create_enquiry_audit.sql`, and optionally `202610240003_audit_cascade_on_delete.sql`.
+4. Start the app:
 
    ```bash
    npm run dev
    ```
 
-6. Open `http://localhost:3000`.
+5. Open `http://localhost:3000`.
 
 **Before credentials are configured:** the enquiry page deliberately returns a clear setup error and does not claim the enquiry was saved.
 
@@ -76,7 +76,9 @@ Requirements: Node.js 20+ and npm.
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL | Public |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Reserved for future client-safe auth usage | Public |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-side database write for enquiries | Secret; server only |
-| `ENABLE_NOTIFICATIONS` | Future notification feature flag | Server only |
+| `ENABLE_NOTIFICATIONS` | Notification feature flag (`true` or `false`) | Server only |
+| `RESEND_API_KEY` | Optional live transactional email API key | Secret; server only |
+| `NOTIFICATIONS_FROM_EMAIL` | Sender address (e.g. `Divine Links <ops@divinelinks.co>`) | Server only |
 
 Never commit `.env.local`, share service-role keys, or put secrets in `NEXT_PUBLIC_*` variables.
 
