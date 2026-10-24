@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --ink: #17324F;
+  --muted: #586B7E;
+  --blue: #1676C8;
+  --teal: #13A89E;
+  --border: #DCE6EF;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: #fff;
+  color: var(--ink);
+  font-family: var(--font-sans), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { text-decoration: none; }
+button, input, select, textarea { font: inherit; }
+::selection { background: #DDECF9; color: #17324F; }
+:focus-visible { outline: 3px solid rgba(22, 118, 200, .35); outline-offset: 3px; }
+
+.container { width: min(1160px, calc(100% - 40px)); margin-inline: auto; }
+.eyebrow { letter-spacing: .14em; text-transform: uppercase; font-size: .74rem; font-weight: 800; color: #1676C8; }
+.soft-grid {
+  background-image: radial-gradient(rgba(22, 118, 200, .14) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+.hero-orb {
+  background: radial-gradient(circle at 35% 28%, rgba(19,168,158,.2), transparent 32%),
+              radial-gradient(circle at 68% 65%, rgba(22,118,200,.18), transparent 38%),
+              linear-gradient(135deg, #F2F8FD, #FFFFFF 68%);
+}
