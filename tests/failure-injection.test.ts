@@ -92,9 +92,7 @@ vi.mock("@supabase/supabase-js", () => {
           if (table === "notifications_outbox") {
             outboxUpdatedRecord = payload;
           }
-          return {
-            eq: vi.fn().mockReturnThis(),
-            select: vi.fn().mockReturnThis(),
+          const selectResult = {
             maybeSingle: vi.fn().mockResolvedValue({
               data: {
                 id: "a1b2c3d4-e5f6-4a1b-8c2d-3e4f5a6b7c8d",
@@ -106,8 +104,35 @@ vi.mock("@supabase/supabase-js", () => {
                 assigned_to: null
               },
               error: null
-            })
+            }),
+            then: (resolve: (v: unknown) => unknown) => {
+              if (table === "notifications_outbox") {
+                const updated = outboxMockJobs.length > 0 ? [{ ...outboxMockJobs[0], ...payload }] : [];
+                return resolve({ data: updated, error: null });
+              }
+              return resolve({
+                data: [{
+                  id: "a1b2c3d4-e5f6-4a1b-8c2d-3e4f5a6b7c8d",
+                  reference: "DL-ABCD1234",
+                  full_name: "Test User",
+                  email: "test@example.com",
+                  status: payload.status || initialStatus,
+                  internal_notes: "Initial note",
+                  assigned_to: null
+                }],
+                error: null
+              });
+            }
           };
+
+          const updateBuilder: Record<string, unknown> = {
+            eq: vi.fn(() => updateBuilder),
+            in: vi.fn(() => updateBuilder),
+            select: vi.fn(() => selectResult),
+            maybeSingle: selectResult.maybeSingle,
+            then: selectResult.then
+          };
+          return updateBuilder;
         }),
         delete: vi.fn(() => ({
           eq: vi.fn().mockImplementation(async () => {
@@ -373,5 +398,24 @@ describe("Failure-Injection & Transactional Recovery Suite", () => {
       delete process.env.UPSTASH_REDIS_REST_URL;
       delete process.env.UPSTASH_REDIS_REST_TOKEN;
     });
+
+    it("fails closed and blocks requests when REDIS_OUTAGE_POLICY=fail_closed during outage", async () => {
+      process.env.UPSTASH_REDIS_REST_URL = "https://mock-redis.upstash.io";
+      process.env.UPSTASH_REDIS_REST_TOKEN = "mock-token";
+      process.env.REDIS_OUTAGE_POLICY = "fail_closed";
+
+      global.fetch = vi.fn().mockRejectedValue(new Error("ECONNREFUSED: Redis cluster down"));
+
+      const ip = "192.0.2.99";
+      const res = await checkRateLimit(ip, "enquiry");
+      expect(res.allowed).toBe(false);
+      expect(res.remaining).toBe(0);
+      expect(res.isFallback).toBe(true);
+
+      delete process.env.UPSTASH_REDIS_REST_URL;
+      delete process.env.UPSTASH_REDIS_REST_TOKEN;
+      delete process.env.REDIS_OUTAGE_POLICY;
+    });
   });
 });
+

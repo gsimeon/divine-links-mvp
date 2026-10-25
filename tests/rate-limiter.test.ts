@@ -84,6 +84,18 @@ describe("Production Rate Limiter & Trusted Client IP", () => {
       // When configured for Cloudflare, cf-connecting-ip is authoritative
       expect(getClientIp(forgedReq, { trustedProxyProvider: "cloudflare" })).toBe("1.2.3.4");
     });
+
+    it("auto-detects Vercel deployment when process.env.VERCEL is 1", () => {
+      process.env.VERCEL = "1";
+      const forgedReq = new NextRequest("http://localhost:3000/api/enquiries", {
+        headers: {
+          "cf-connecting-ip": "1.2.3.4",
+          "x-vercel-forwarded-for": "5.6.7.8"
+        }
+      });
+      expect(getClientIp(forgedReq)).toBe("5.6.7.8");
+      delete process.env.VERCEL;
+    });
   });
 
   describe("Multi-Tier Independent Rate Limiting", () => {

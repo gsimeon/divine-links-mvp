@@ -88,9 +88,14 @@ export function getClientIp(
   request: NextRequest,
   options?: ClientIpOptions
 ): string {
-  const provider =
+  let provider =
     options?.trustedProxyProvider ||
     (process.env.TRUSTED_PROXY_PROVIDER as "cloudflare" | "vercel" | "custom" | "none" | undefined);
+
+  // Auto-detect Vercel edge environment if not explicitly specified
+  if (!provider && process.env.VERCEL === "1") {
+    provider = "vercel";
+  }
 
   // 1. Direct trusted edge proxy headers based on verified provider
   if (provider === "cloudflare") {
@@ -228,6 +233,22 @@ export async function checkRateLimit(
         };
       }
     } catch (redisError) {
+      const outagePolicy = process.env.REDIS_OUTAGE_POLICY || "fail_safe"; // "fail_safe" | "fail_closed"
+
+      if (outagePolicy === "fail_closed") {
+        console.error("[RateLimiter] Distributed store unreachable under fail-closed policy, rejecting request", {
+          key: storageKey,
+          error: redisError instanceof Error ? redisError.message : String(redisError)
+        });
+        return {
+          allowed: false,
+          remaining: 0,
+          limit: config.limit,
+          resetTime: now + config.windowMs,
+          isFallback: true
+        };
+      }
+
       console.warn("[RateLimiter] Distributed store unreachable, engaging local in-memory fallback", {
         key: storageKey,
         error: redisError instanceof Error ? redisError.message : String(redisError)

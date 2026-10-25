@@ -12,10 +12,14 @@ function getClient() {
 }
 
 /**
- * Triggers batch processing of the notifications outbox queue.
+ * Shared handler for processing the notifications outbox queue.
  * Protected by admin authorization or CRON_SECRET.
+ * 
+ * Supports both:
+ * - GET: Native Vercel Cron invocation (`Authorization: Bearer <CRON_SECRET>`)
+ * - POST: Manual trigger from admin console or automated webhook
  */
-export async function POST(request: NextRequest) {
+async function handleProcess(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
   const cronSecretHeader = request.headers.get("x-cron-secret");
   const configuredCronSecret = process.env.CRON_SECRET;
@@ -42,4 +46,12 @@ export async function POST(request: NextRequest) {
 
   const summary = await processOutboxQueue();
   return NextResponse.json({ ok: true, summary });
+}
+
+export async function GET(request: NextRequest) {
+  return handleProcess(request);
+}
+
+export async function POST(request: NextRequest) {
+  return handleProcess(request);
 }
