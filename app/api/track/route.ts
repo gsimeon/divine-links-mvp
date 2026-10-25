@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { trackSchema } from "@/lib/schemas";
-import { rateLimited } from "@/lib/rate-limiter";
+import { getClientIp, checkRateLimit } from "@/lib/rate-limiter";
 
 export const runtime = "nodejs";
 
@@ -70,10 +70,20 @@ function getTimelineInfo(status: string) {
 }
 
 export async function POST(request: NextRequest) {
-  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const ip = forwarded || "unknown";
-  if (rateLimited(ip)) {
-    return NextResponse.json({ error: "Too many lookup attempts. Please wait a few minutes." }, { status: 429 });
+  const ip = getClientIp(request);
+  const rateResult = await checkRateLimit(ip, "tracking");
+  if (!rateResult.allowed) {
+    return NextResponse.json(
+      { error: "Too many lookup attempts. Please wait a few minutes." },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": Math.ceil((rateResult.resetTime - Date.now()) / 1000).toString(),
+          "X-RateLimit-Limit": rateResult.limit.toString(),
+          "X-RateLimit-Remaining": "0"
+        }
+      }
+    );
   }
 
   let raw: unknown;

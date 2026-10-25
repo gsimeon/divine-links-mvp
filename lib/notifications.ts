@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { createClient } from "@supabase/supabase-js";
 
 export type NotificationChannel = "email" | "sms";
 
 export type EnquiryNotificationPayload = {
+  enquiryId?: string;
   reference: string;
   fullName: string;
   email: string;
@@ -13,6 +15,7 @@ export type EnquiryNotificationPayload = {
 };
 
 export type StatusUpdateNotificationPayload = {
+  enquiryId?: string;
   reference: string;
   fullName: string;
   email: string;
@@ -29,7 +32,7 @@ export type NotificationRecord = {
   subject?: string;
   body: string;
   simulated: boolean;
-  deliveryStatus?: "simulated" | "sent" | "failed";
+  deliveryStatus: "simulated" | "sent" | "failed";
   timestamp: string;
   metadata?: Record<string, unknown>;
 };
@@ -52,15 +55,21 @@ export function areNotificationsEnabled(): boolean {
   return process.env.ENABLE_NOTIFICATIONS === "true";
 }
 
+export interface DispatchOutcome {
+  deliveryStatus: "simulated" | "sent" | "failed";
+  providerId?: string;
+  errorMessage?: string;
+}
+
 /**
- * Sends an email using a configured live email provider (e.g. Resend) or logs simulated execution.
+ * Dispatches an email using Resend HTTP API when configured, or returns simulated.
  */
-async function dispatchEmail(to: string, subject: string, body: string): Promise<"simulated" | "sent" | "failed"> {
+export async function dispatchEmail(to: string, subject: string, body: string): Promise<DispatchOutcome> {
   const isEnabled = areNotificationsEnabled();
   const resendApiKey = process.env.RESEND_API_KEY;
 
   if (!isEnabled || !resendApiKey) {
-    return "simulated";
+    return { deliveryStatus: "simulated" };
   }
 
   try {
@@ -81,14 +90,58 @@ async function dispatchEmail(to: string, subject: string, body: string): Promise
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error("[Notification Dispatch Error] Resend HTTP failure", { status: response.status, details: errText });
-      return "failed";
+      const sanitized = errText.slice(0, 300);
+      console.error("[Notification Dispatch Error] Resend HTTP failure", { status: response.status, details: sanitized });
+      return { deliveryStatus: "failed", errorMessage: `HTTP ${response.status}: ${sanitized}` };
     }
 
-    return "sent";
+    const data = await response.json().catch(() => ({})) as { id?: string };
+    return { deliveryStatus: "sent", providerId: data.id };
   } catch (error) {
-    console.error("[Notification Dispatch Error] Unhandled network failure", error);
-    return "failed";
+    const message = error instanceof Error ? error.message : "Network error";
+    console.error("[Notification Dispatch Error] Unhandled network failure", message);
+    return { deliveryStatus: "failed", errorMessage: message };
+  }
+}
+
+/**
+ * Persists a notification record both in memory and into the durable Supabase outbox table if available.
+ */
+async function recordNotification(
+  record: NotificationRecord,
+  enquiryId?: string,
+  providerId?: string,
+  errorMessage?: string
+): Promise<void> {
+  notificationLog.push(record);
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) return;
+
+  try {
+    const supabase = createClient(url, serviceKey, {
+      auth: { autoRefreshToken: false, persistSession: false }
+    });
+
+    await supabase.from("notifications_outbox").insert({
+      id: record.id,
+      enquiry_id: enquiryId || null,
+      recipient: record.recipient,
+      channel: record.channel,
+      subject: record.subject || "",
+      body: record.body,
+      status: record.deliveryStatus,
+      attempts: 1,
+      last_attempt_at: new Date().toISOString(),
+      provider_message_id: providerId || null,
+      error_message: errorMessage || null,
+      created_at: record.timestamp,
+      sent_at: record.deliveryStatus === "sent" ? new Date().toISOString() : null,
+      metadata: record.metadata || {}
+    });
+  } catch {
+    // If the database outbox table is not yet migrated, in-memory log remains active.
   }
 }
 
@@ -117,27 +170,28 @@ Kind regards,
 The Divine Links Team
 https://divinelinks.co`;
 
-  const deliveryStatus = await dispatchEmail(payload.email, subject, body);
+  const outcome = await dispatchEmail(payload.email, subject, body);
 
   const record: NotificationRecord = {
-    id: `notif-${randomUUID()}`,
+    id: randomUUID(),
     channel: "email",
     recipient: payload.email,
     subject,
     body,
-    simulated: deliveryStatus === "simulated",
-    deliveryStatus,
+    simulated: outcome.deliveryStatus === "simulated",
+    deliveryStatus: outcome.deliveryStatus,
     timestamp: new Date().toISOString(),
     metadata: {
       reference: payload.reference,
       type: "customer_confirmation",
-      service: payload.service
+      service: payload.service,
+      providerId: outcome.providerId
     }
   };
 
-  notificationLog.push(record);
+  await recordNotification(record, payload.enquiryId, outcome.providerId, outcome.errorMessage);
 
-  if (deliveryStatus === "simulated") {
+  if (outcome.deliveryStatus === "simulated") {
     console.info("[Notification Simulated - Customer Confirmation]", {
       recipient: payload.email,
       reference: payload.reference
@@ -170,26 +224,27 @@ ${payload.details}
 Review in Admin Desk:
 http://localhost:3000/admin`;
 
-  const deliveryStatus = await dispatchEmail(adminEmail, subject, body);
+  const outcome = await dispatchEmail(adminEmail, subject, body);
 
   const record: NotificationRecord = {
-    id: `notif-${randomUUID()}`,
+    id: randomUUID(),
     channel: "email",
     recipient: adminEmail,
     subject,
     body,
-    simulated: deliveryStatus === "simulated",
-    deliveryStatus,
+    simulated: outcome.deliveryStatus === "simulated",
+    deliveryStatus: outcome.deliveryStatus,
     timestamp: new Date().toISOString(),
     metadata: {
       reference: payload.reference,
-      type: "admin_alert"
+      type: "admin_alert",
+      providerId: outcome.providerId
     }
   };
 
-  notificationLog.push(record);
+  await recordNotification(record, payload.enquiryId, outcome.providerId, outcome.errorMessage);
 
-  if (deliveryStatus === "simulated") {
+  if (outcome.deliveryStatus === "simulated") {
     console.info("[Notification Simulated - Admin Alert]", {
       recipient: adminEmail,
       reference: payload.reference
@@ -223,27 +278,28 @@ If you have questions or wish to provide additional details, please contact us a
 Best regards,
 The Divine Links Operations Desk`;
 
-  const deliveryStatus = await dispatchEmail(payload.email, subject, body);
+  const outcome = await dispatchEmail(payload.email, subject, body);
 
   const record: NotificationRecord = {
-    id: `notif-${randomUUID()}`,
+    id: randomUUID(),
     channel: "email",
     recipient: payload.email,
     subject,
     body,
-    simulated: deliveryStatus === "simulated",
-    deliveryStatus,
+    simulated: outcome.deliveryStatus === "simulated",
+    deliveryStatus: outcome.deliveryStatus,
     timestamp: new Date().toISOString(),
     metadata: {
       reference: payload.reference,
       oldStatus: payload.oldStatus,
-      newStatus: payload.newStatus
+      newStatus: payload.newStatus,
+      providerId: outcome.providerId
     }
   };
 
-  notificationLog.push(record);
+  await recordNotification(record, payload.enquiryId, outcome.providerId, outcome.errorMessage);
 
-  if (deliveryStatus === "simulated") {
+  if (outcome.deliveryStatus === "simulated") {
     console.info("[Notification Simulated - Status Change]", {
       recipient: payload.email,
       reference: payload.reference,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { statusSchema, updateSchema } from "@/lib/schemas";
 import { sendStatusUpdateNotification } from "@/lib/notifications";
+import { getClientIp, checkRateLimit } from "@/lib/rate-limiter";
 
 export const runtime = "nodejs";
 
@@ -30,6 +31,12 @@ async function requireAdmin(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
+  const ip = getClientIp(request);
+  const rateResult = await checkRateLimit(ip, "admin");
+  if (!rateResult.allowed) {
+    return NextResponse.json({ error: "Too many admin requests. Please slow down." }, { status: 429 });
+  }
+
   const auth = await requireAdmin(request);
   if ("error" in auth) return auth.error;
 
@@ -74,6 +81,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const ip = getClientIp(request);
+  const rateResult = await checkRateLimit(ip, "admin");
+  if (!rateResult.allowed) {
+    return NextResponse.json({ error: "Too many admin requests. Please slow down." }, { status: 429 });
+  }
+
   const auth = await requireAdmin(request);
   if ("error" in auth) return auth.error;
 
@@ -87,7 +100,53 @@ export async function PATCH(request: NextRequest) {
   const parsed = updateSchema.safeParse(raw);
   if (!parsed.success) return NextResponse.json({ error: "Please check the update fields." }, { status: 400 });
 
-  // 1. Fetch existing record to capture previous status and verify existence
+  // Attempt Atomic Update via PostgreSQL Database Function (RPC)
+  const { data: rpcData, error: rpcError } = await auth.client.rpc("admin_update_enquiry", {
+    p_enquiry_id: parsed.data.id,
+    p_actor_user_id: auth.userId,
+    p_status: parsed.data.status,
+    p_internal_notes: parsed.data.internalNotes?.trim() || null,
+    p_assigned_to: parsed.data.assignedTo || null
+  });
+
+  if (!rpcError && rpcData) {
+    const outcome = rpcData as {
+      enquiry: {
+        id: string;
+        reference: string;
+        full_name: string;
+        email: string;
+        status: string;
+        internal_notes: string | null;
+        assigned_to: string | null;
+        updated_at: string;
+      };
+      previous_status: string;
+      status_changed: boolean;
+      audit_id: string;
+    };
+
+    if (outcome.status_changed || parsed.data.customerMessage) {
+      await sendStatusUpdateNotification({
+        enquiryId: outcome.enquiry.id,
+        reference: outcome.enquiry.reference,
+        fullName: outcome.enquiry.full_name,
+        email: outcome.enquiry.email,
+        oldStatus: outcome.previous_status,
+        newStatus: outcome.enquiry.status,
+        customerMessage: parsed.data.customerMessage?.trim() || null
+      });
+    }
+
+    return NextResponse.json({
+      enquiry: outcome.enquiry,
+      auditLogged: true,
+      atomic: true,
+      previousStatus: outcome.previous_status
+    });
+  }
+
+  // Fallback: Two-phase update with compensation rollback if RPC is not yet registered in schema
   const { data: existing, error: fetchError } = await auth.client
     .from("enquiries")
     .select("id, reference, full_name, email, status, internal_notes, assigned_to")
@@ -102,23 +161,15 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Enquiry not found." }, { status: 404 });
   }
 
-  // 2. Prepare update payload
-  const update: Record<string, unknown> = {
-    status: parsed.data.status
+  const updatePayload: Record<string, unknown> = {
+    status: parsed.data.status,
+    internal_notes: parsed.data.internalNotes !== undefined ? parsed.data.internalNotes.trim() : existing.internal_notes,
+    assigned_to: parsed.data.assignedTo !== undefined ? parsed.data.assignedTo : existing.assigned_to
   };
 
-  if (parsed.data.internalNotes !== undefined) {
-    update.internal_notes = parsed.data.internalNotes.trim();
-  }
-
-  if (parsed.data.assignedTo !== undefined) {
-    update.assigned_to = parsed.data.assignedTo;
-  }
-
-  // 3. Execute update
   const { data: updated, error: updateError } = await auth.client
     .from("enquiries")
-    .update(update)
+    .update(updatePayload)
     .eq("id", parsed.data.id)
     .select("id, reference, full_name, email, status, internal_notes, assigned_to, updated_at")
     .maybeSingle();
@@ -128,7 +179,6 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Unable to update this enquiry right now." }, { status: 502 });
   }
 
-  // 4. Record audit event with accurate state transitions (old_status & new_status)
   const statusChanged = existing.status !== updated.status;
   const notesChanged = existing.internal_notes !== updated.internal_notes;
   const assignmentChanged = existing.assigned_to !== updated.assigned_to;
@@ -150,19 +200,27 @@ export async function PATCH(request: NextRequest) {
     note: parsed.data.internalNotes?.trim() || null
   });
 
+  // CRITICAL AUDIT INTEGRITY: If audit logging fails, roll back enquiry status immediately!
   if (auditError) {
-    console.error("CRITICAL: Admin audit event write failed", {
+    console.error("CRITICAL: Admin audit write failed, rolling back enquiry state", {
       code: auditError.code,
-      enquiryId: updated.id,
-      actorUserId: auth.userId,
-      oldStatus: existing.status,
-      newStatus: updated.status
+      enquiryId: updated.id
     });
+
+    await auth.client.from("enquiries").update({
+      status: existing.status,
+      internal_notes: existing.internal_notes,
+      assigned_to: existing.assigned_to
+    }).eq("id", parsed.data.id);
+
+    return NextResponse.json({
+      error: "Audit trail write failed. To ensure compliance, the status update was rolled back."
+    }, { status: 500 });
   }
 
-  // 5. Asynchronous customer notification (PRIVACY PRESERVED: internal notes are NEVER included)
   if (statusChanged || parsed.data.customerMessage) {
-    void sendStatusUpdateNotification({
+    await sendStatusUpdateNotification({
+      enquiryId: updated.id,
       reference: updated.reference,
       fullName: updated.full_name,
       email: updated.email,
@@ -174,7 +232,8 @@ export async function PATCH(request: NextRequest) {
 
   return NextResponse.json({
     enquiry: updated,
-    auditLogged: !auditError,
+    auditLogged: true,
+    atomic: false,
     previousStatus: existing.status
   });
 }

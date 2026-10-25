@@ -31,6 +31,29 @@ export async function GET(request: NextRequest) {
   const auth = await requireAdmin(request);
   if ("error" in auth) return auth.error;
 
+  // 1. Attempt to query durable Supabase notifications_outbox table
+  const { data: outboxRows, error: outboxError } = await auth.client
+    .from("notifications_outbox")
+    .select("id, recipient, channel, subject, body, status, error_message, attempts, metadata, created_at, sent_at")
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  if (!outboxError && outboxRows && outboxRows.length > 0) {
+    const formatted = outboxRows.map(row => ({
+      id: row.id,
+      channel: row.channel,
+      recipient: row.recipient,
+      subject: row.subject,
+      body: row.body,
+      simulated: row.status === "simulated",
+      deliveryStatus: row.status,
+      timestamp: row.created_at,
+      metadata: row.metadata
+    }));
+    return NextResponse.json({ notifications: formatted, source: "database" });
+  }
+
+  // 2. Fallback to in-memory history if outbox table is not yet migrated
   const history = getNotificationHistory();
-  return NextResponse.json({ notifications: history });
+  return NextResponse.json({ notifications: history, source: "memory" });
 }
