@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { randomUUID } from "node:crypto";
 import { statusSchema, updateSchema } from "@/lib/schemas";
 import { sendStatusUpdateNotification } from "@/lib/notifications";
 import { getClientIp, checkRateLimit } from "@/lib/rate-limiter";
@@ -109,7 +110,26 @@ export async function PATCH(request: NextRequest) {
     p_assigned_to: parsed.data.assignedTo || null
   });
 
-  if (!rpcError && rpcData) {
+  if (rpcError) {
+    const isMissingFunction = rpcError.code === "PGRST202";
+    const allowFallback = process.env.ALLOW_SCHEMA_FALLBACK === "true" && isMissingFunction;
+
+    if (!allowFallback) {
+      const correlationId = randomUUID();
+      console.error("[Admin Update Error] Database transaction failed closed", {
+        correlationId,
+        code: rpcError.code,
+        message: rpcError.message,
+        enquiryId: parsed.data.id
+      });
+      return NextResponse.json(
+        { error: "Database transaction failed. Update was not applied.", correlationId },
+        { status: 502 }
+      );
+    }
+
+    console.warn("[Admin Update Fallback] ALLOW_SCHEMA_FALLBACK active for missing RPC", { enquiryId: parsed.data.id });
+  } else if (rpcData) {
     const outcome = rpcData as {
       enquiry: {
         id: string;
@@ -146,7 +166,7 @@ export async function PATCH(request: NextRequest) {
     });
   }
 
-  // Fallback: Two-phase update with compensation rollback if RPC is not yet registered in schema
+  // Fallback: Two-phase update with compensation rollback ONLY if explicitly allowed for schema compatibility
   const { data: existing, error: fetchError } = await auth.client
     .from("enquiries")
     .select("id, reference, full_name, email, status, internal_notes, assigned_to")

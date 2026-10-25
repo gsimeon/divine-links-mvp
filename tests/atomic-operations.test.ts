@@ -149,9 +149,36 @@ describe("Atomic Operations & Audit Integrity", () => {
     expect(body.enquiry.status).toBe("under_review");
   });
 
-  it("rolls back enquiry status update if audit event write fails (strict compliance guarantee)", async () => {
+  it("fails closed with 502 and correlationId when RPC fails and fallback is disabled", async () => {
+    simulateRpcAvailable = false; // RPC missing/failed
+    delete process.env.ALLOW_SCHEMA_FALLBACK;
+
+    const { PATCH } = await import("@/app/api/admin/enquiries/route");
+    const req = new NextRequest("http://localhost:3000/api/admin/enquiries", {
+      method: "PATCH",
+      headers: {
+        Authorization: "Bearer valid-admin-token",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        id: mockEnquiry.id,
+        status: "under_review",
+        internalNotes: "Should fail closed"
+      })
+    });
+
+    const res = await PATCH(req);
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(502);
+    const body = await res!.json();
+    expect(body.error).toContain("Database transaction failed");
+    expect(body.correlationId).toBeDefined();
+  });
+
+  it("rolls back enquiry status update if audit event write fails when fallback is explicitly permitted", async () => {
     simulateRpcAvailable = false; // Exercises the compensation fallback
     simulateAuditFailure = true;  // Simulates audit table write failure
+    process.env.ALLOW_SCHEMA_FALLBACK = "true";
 
     const { PATCH } = await import("@/app/api/admin/enquiries/route");
     const req = new NextRequest("http://localhost:3000/api/admin/enquiries", {
@@ -198,8 +225,35 @@ describe("Atomic Operations & Audit Integrity", () => {
     expect(body.message).toContain("atomic");
   });
 
-  it("deletes dependent tables in strict foreign key order during fallback GDPR erasure", async () => {
+  it("fails closed on GDPR deletion when RPC fails and fallback is disabled", async () => {
     simulateRpcAvailable = false;
+    delete process.env.ALLOW_SCHEMA_FALLBACK;
+
+    const { POST } = await import("@/app/api/admin/enquiries/gdpr/route");
+    const req = new NextRequest("http://localhost:3000/api/admin/enquiries/gdpr", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer valid-admin-token",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        id: mockEnquiry.id,
+        action: "delete"
+      })
+    });
+
+    const res = await POST(req);
+    expect(res).toBeDefined();
+    expect(res!.status).toBe(502);
+    const body = await res!.json();
+    expect(body.error).toContain("deletion transaction failed");
+    expect(body.correlationId).toBeDefined();
+  });
+
+  it("deletes dependent tables in strict foreign key order during fallback GDPR erasure when permitted", async () => {
+    simulateRpcAvailable = false;
+    process.env.ALLOW_SCHEMA_FALLBACK = "true";
+
     const { POST } = await import("@/app/api/admin/enquiries/gdpr/route");
     const req = new NextRequest("http://localhost:3000/api/admin/enquiries/gdpr", {
       method: "POST",

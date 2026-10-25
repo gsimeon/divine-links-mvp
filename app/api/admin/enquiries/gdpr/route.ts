@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { getClientIp, checkRateLimit } from "@/lib/rate-limiter";
@@ -97,6 +98,25 @@ export async function POST(request: NextRequest) {
   if (!rpcDelError) {
     return NextResponse.json({ ok: true, message: "Enquiry record and associated data permanently deleted (atomic)." });
   }
+
+  const isMissingFunction = rpcDelError.code === "PGRST202";
+  const allowFallback = process.env.ALLOW_SCHEMA_FALLBACK === "true" && isMissingFunction;
+
+  if (!allowFallback) {
+    const correlationId = randomUUID();
+    console.error("[GDPR Delete Error] Database transaction failed closed", {
+      correlationId,
+      code: rpcDelError.code,
+      message: rpcDelError.message,
+      enquiryId: parsed.data.id
+    });
+    return NextResponse.json(
+      { error: "Atomic deletion transaction failed.", correlationId },
+      { status: 502 }
+    );
+  }
+
+  console.warn("[GDPR Delete Fallback] ALLOW_SCHEMA_FALLBACK active for missing RPC", { enquiryId: parsed.data.id });
 
   // Fallback: Sequential deletion in strict foreign key order (outbox -> audit -> enquiry)
   // 1. Delete associated outbox rows

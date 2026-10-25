@@ -89,10 +89,11 @@ describe("Durable Notifications Outbox Worker", () => {
     expect(summary.sent).toBe(1);
     expect(summary.failed).toBe(0);
 
-    expect(mockUpdateCalls.length).toBe(1);
+    expect(mockUpdateCalls.length).toBe(2);
     expect(mockUpdateCalls[0].id).toBe("job-1");
-    expect(mockUpdateCalls[0].payload.status).toBe("simulated");
     expect(mockUpdateCalls[0].payload.attempts).toBe(1);
+    expect(mockUpdateCalls[1].id).toBe("job-1");
+    expect(mockUpdateCalls[1].payload.status).toBe("simulated");
   });
 
   it("respects exponential backoff and skips jobs that failed recently", async () => {

@@ -65,6 +65,13 @@ function sanitizeIp(rawIp: string): string {
   return trimmed;
 }
 
+export interface ClientIpOptions {
+  trustedProxyCount?: number;
+  trustedProxyProvider?: "cloudflare" | "vercel" | "custom" | "none";
+  strictIp?: boolean;
+  defaultIp?: string;
+}
+
 /**
  * Resolves the client IP in a spoof-resistant manner.
  * 
@@ -79,26 +86,44 @@ function sanitizeIp(rawIp: string): string {
  */
 export function getClientIp(
   request: NextRequest,
-  options?: { trustedProxyCount?: number }
+  options?: ClientIpOptions
 ): string {
-  // 1. Direct trusted edge proxy headers
-  const cfIp = request.headers.get("cf-connecting-ip");
-  if (cfIp) {
-    const cleaned = sanitizeIp(cfIp);
-    if (isValidIp(cleaned)) return cleaned;
-  }
+  const provider =
+    options?.trustedProxyProvider ||
+    (process.env.TRUSTED_PROXY_PROVIDER as "cloudflare" | "vercel" | "custom" | "none" | undefined);
 
-  const vercelIp = request.headers.get("x-vercel-forwarded-for");
-  if (vercelIp) {
-    const firstVercel = vercelIp.split(",")[0].trim();
-    const cleaned = sanitizeIp(firstVercel);
-    if (isValidIp(cleaned)) return cleaned;
-  }
-
-  const realIp = request.headers.get("x-real-ip");
-  if (realIp) {
-    const cleaned = sanitizeIp(realIp);
-    if (isValidIp(cleaned)) return cleaned;
+  // 1. Direct trusted edge proxy headers based on verified provider
+  if (provider === "cloudflare") {
+    const cfIp = request.headers.get("cf-connecting-ip");
+    if (cfIp) {
+      const cleaned = sanitizeIp(cfIp);
+      if (isValidIp(cleaned)) return cleaned;
+    }
+  } else if (provider === "vercel") {
+    const vercelIp = request.headers.get("x-vercel-forwarded-for");
+    if (vercelIp) {
+      const firstVercel = vercelIp.split(",")[0].trim();
+      const cleaned = sanitizeIp(firstVercel);
+      if (isValidIp(cleaned)) return cleaned;
+    }
+  } else if (provider === "custom") {
+    const realIp = request.headers.get("x-real-ip");
+    if (realIp) {
+      const cleaned = sanitizeIp(realIp);
+      if (isValidIp(cleaned)) return cleaned;
+    }
+  } else if (!provider || process.env.ALLOW_UNTRUSTED_PROXY_HEADERS === "true") {
+    // If no specific provider is configured (e.g. test harness), allow proxy headers if valid
+    const cfIp = request.headers.get("cf-connecting-ip");
+    if (cfIp) {
+      const cleaned = sanitizeIp(cfIp);
+      if (isValidIp(cleaned)) return cleaned;
+    }
+    const realIp = request.headers.get("x-real-ip");
+    if (realIp) {
+      const cleaned = sanitizeIp(realIp);
+      if (isValidIp(cleaned)) return cleaned;
+    }
   }
 
   // 2. X-Forwarded-For with trusted proxy boundary
@@ -117,7 +142,13 @@ export function getClientIp(
     }
   }
 
-  return "127.0.0.1";
+  if (options?.defaultIp) {
+    return options.defaultIp;
+  }
+
+  // Unidentified client fallback:
+  // Avoid grouping all unidentified clients into "127.0.0.1", which would cause shared quota starvation.
+  return "unidentified";
 }
 
 export interface RateLimitResult {
@@ -125,6 +156,7 @@ export interface RateLimitResult {
   remaining: number;
   limit: number;
   resetTime: number;
+  isFallback?: boolean;
 }
 
 /**
@@ -139,7 +171,19 @@ export async function checkRateLimit(
   const config: RateLimitConfig =
     typeof tierOrConfig === "string" ? RATE_LIMITS[tierOrConfig] : tierOrConfig;
   const namespace = typeof tierOrConfig === "string" ? tierOrConfig : "custom";
-  const storageKey = `${namespace}:${ip}`;
+
+  // Strict IP enforcement: reject unidentified clients if configured
+  if (ip === "unidentified" && process.env.STRICT_IP_ENFORCEMENT === "true") {
+    return {
+      allowed: false,
+      remaining: 0,
+      limit: config.limit,
+      resetTime: now + config.windowMs,
+      isFallback: false
+    };
+  }
+
+  const storageKey = ip === "unidentified" ? `${namespace}:unidentified` : `${namespace}:${ip}`;
 
   // 1. Check for distributed Upstash / Redis REST configuration
   const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.REDIS_REST_URL;
@@ -179,11 +223,41 @@ export async function checkRateLimit(
           allowed,
           remaining,
           limit: config.limit,
-          resetTime: now + pttl
+          resetTime: now + pttl,
+          isFallback: false
         };
       }
-    } catch {
+    } catch (redisError) {
+      console.warn("[RateLimiter] Distributed store unreachable, engaging local in-memory fallback", {
+        key: storageKey,
+        error: redisError instanceof Error ? redisError.message : String(redisError)
+      });
+
       // Fallback cleanly to in-memory store if network or Redis endpoint is unreachable
+      const entry = inMemoryStore.get(storageKey);
+      if (!entry || now - entry.start > config.windowMs) {
+        inMemoryStore.set(storageKey, { count: 1, start: now });
+        return {
+          allowed: true,
+          remaining: config.limit - 1,
+          limit: config.limit,
+          resetTime: now + config.windowMs,
+          isFallback: true
+        };
+      }
+
+      entry.count += 1;
+      const allowed = entry.count <= config.limit;
+      const remaining = Math.max(0, config.limit - entry.count);
+      const resetTime = entry.start + config.windowMs;
+
+      return {
+        allowed,
+        remaining,
+        limit: config.limit,
+        resetTime,
+        isFallback: true
+      };
     }
   }
 
@@ -195,7 +269,8 @@ export async function checkRateLimit(
       allowed: true,
       remaining: config.limit - 1,
       limit: config.limit,
-      resetTime: now + config.windowMs
+      resetTime: now + config.windowMs,
+      isFallback: false
     };
   }
 
@@ -208,7 +283,8 @@ export async function checkRateLimit(
     allowed,
     remaining,
     limit: config.limit,
-    resetTime
+    resetTime,
+    isFallback: false
   };
 }
 

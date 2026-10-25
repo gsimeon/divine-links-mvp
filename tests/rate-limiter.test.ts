@@ -64,9 +64,25 @@ describe("Production Rate Limiter & Trusted Client IP", () => {
       expect(isValidIp("invalid-ip-string")).toBe(false);
     });
 
-    it("falls back cleanly to loopback when no IP header is provided", () => {
+    it("isolates unidentified clients when no IP header is provided instead of pooling under loopback", () => {
       const req = new NextRequest("http://localhost:3000/api/enquiries");
-      expect(getClientIp(req)).toBe("127.0.0.1");
+      expect(getClientIp(req)).toBe("unidentified");
+      expect(getClientIp(req, { defaultIp: "127.0.0.1" })).toBe("127.0.0.1");
+    });
+
+    it("verifies proxy provider boundaries against forged edge headers", () => {
+      const forgedReq = new NextRequest("http://localhost:3000/api/enquiries", {
+        headers: {
+          "cf-connecting-ip": "1.2.3.4",
+          "x-vercel-forwarded-for": "5.6.7.8"
+        }
+      });
+
+      // When configured for Vercel, attacker's spoofed cf-connecting-ip is ignored
+      expect(getClientIp(forgedReq, { trustedProxyProvider: "vercel" })).toBe("5.6.7.8");
+
+      // When configured for Cloudflare, cf-connecting-ip is authoritative
+      expect(getClientIp(forgedReq, { trustedProxyProvider: "cloudflare" })).toBe("1.2.3.4");
     });
   });
 

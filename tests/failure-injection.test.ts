@@ -172,8 +172,64 @@ describe("Failure-Injection & Transactional Recovery Suite", () => {
     });
   });
 
+  describe("Fail-Closed Transactional Protections", () => {
+    it("fails closed and preserves atomicity on enquiry submission when RPC fails", async () => {
+      delete process.env.ALLOW_SCHEMA_FALLBACK;
+      mockEnquiryInsertShouldFail = true;
+
+      const { POST } = await import("@/app/api/enquiries/route");
+      const req = new NextRequest("http://localhost:3000/api/enquiries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fullName: "Fail-Closed Client",
+          email: "failclosed@example.com",
+          phone: "+447000111222",
+          location: "London",
+          service: "broadband",
+          audience: "business",
+          details: "Must fail closed without inserting orphaned rows.",
+          consent: "yes"
+        })
+      });
+
+      const res = await POST(req);
+      expect(res).toBeDefined();
+      expect(res!.status).toBe(502);
+      const body = await res!.json();
+      expect(body.error).toContain("couldn’t save your enquiry");
+      expect(body.correlationId).toBeDefined();
+    });
+
+    it("fails closed on admin status change when RPC returns unexpected error", async () => {
+      delete process.env.ALLOW_SCHEMA_FALLBACK;
+
+      const { PATCH } = await import("@/app/api/admin/enquiries/route");
+      const req = new NextRequest("http://localhost:3000/api/admin/enquiries", {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer valid-token",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          id: "a1b2c3d4-e5f6-4a1b-8c2d-3e4f5a6b7c8d",
+          status: "in_progress",
+          internalNotes: "Should fail closed"
+        })
+      });
+
+      const res = await PATCH(req);
+      expect(res).toBeDefined();
+      expect(res!.status).toBe(502);
+      const body = await res!.json();
+      expect(body.error).toContain("Database transaction failed");
+      expect(body.correlationId).toBeDefined();
+    });
+  });
+
   describe("Status Update Audit Rollback Under Injected Failure", () => {
     it("rolls back enquiry status when audit event insertion fails in non-RPC fallback", async () => {
+      process.env.ALLOW_SCHEMA_FALLBACK = "true";
       mockAuditInsertShouldFail = true;
 
       const { PATCH } = await import("@/app/api/admin/enquiries/route");
@@ -201,6 +257,7 @@ describe("Failure-Injection & Transactional Recovery Suite", () => {
 
   describe("GDPR Hard Erasure Injected Failure", () => {
     it("aborts enquiry erasure if audit cleanup fails, preventing orphaned enquiry state", async () => {
+      process.env.ALLOW_SCHEMA_FALLBACK = "true";
       mockAuditDeleteShouldFail = true;
 
       const { POST } = await import("@/app/api/admin/enquiries/gdpr/route");
