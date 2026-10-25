@@ -25,7 +25,7 @@ export async function GET() {
   let dbStatus: "connected" | "disconnected" | "not_configured" = "not_configured";
   let dbLatencyMs: number | null = null;
 
-  let queueMetrics: OutboxQueueMetrics = {
+  const queueMetrics: OutboxQueueMetrics = {
     pending: 0,
     processing: 0,
     failed: 0,
