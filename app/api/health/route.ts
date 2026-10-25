@@ -51,7 +51,7 @@ export async function GET() {
       if (dbStatus === "connected") {
         const { data: outboxRows, error: outboxError } = await supabase
           .from("notifications_outbox")
-          .select("status, attempts, last_attempt_at, claimed_at, created_at")
+          .select("status, attempts, last_attempt_at, created_at")
           .order("created_at", { ascending: false })
           .limit(100);
 
@@ -62,7 +62,8 @@ export async function GET() {
               queueMetrics.pending++;
             } else if (row.status === "processing") {
               queueMetrics.processing++;
-              if (row.claimed_at && now - new Date(row.claimed_at).getTime() > STALE_LEASE_MS) {
+              const attemptTime = row.last_attempt_at ? new Date(row.last_attempt_at).getTime() : 0;
+              if (attemptTime && now - attemptTime > STALE_LEASE_MS) {
                 queueMetrics.staleProcessing++;
               }
             } else if (row.status === "failed") {

@@ -153,17 +153,17 @@ export async function processOutboxQueue(
 
         // Conditional atomic claim: lock by matching current attempts and status
         const nextAttempts = job.attempts + 1;
-        const claimPayload = {
-          status: "processing",
-          attempts: nextAttempts,
-          last_attempt_at: new Date().toISOString(),
-          claimed_at: new Date().toISOString(),
-          claimed_by: workerId
-        };
+        const nowIso = new Date().toISOString();
 
         let claimQuery = supabase
           .from("notifications_outbox")
-          .update(claimPayload)
+          .update({
+            status: "processing",
+            attempts: nextAttempts,
+            last_attempt_at: nowIso,
+            claimed_at: nowIso,
+            claimed_by: workerId
+          })
           .eq("id", job.id)
           .eq("attempts", job.attempts);
 
@@ -173,7 +173,23 @@ export async function processOutboxQueue(
           claimQuery = claimQuery.in("status", ["pending", "failed"]);
         }
 
-        const { data: updatedRows, error: claimError } = await claimQuery.select();
+        let { data: updatedRows, error: claimError } = await claimQuery.select();
+
+        // If schema does not yet have claimed_at or processing status, fallback to optimistic attempt locking
+        if (claimError && (claimError.message?.includes("claimed_at") || claimError.code === "42703" || claimError.code === "23514")) {
+          const fallbackQuery = supabase
+            .from("notifications_outbox")
+            .update({
+              attempts: nextAttempts,
+              last_attempt_at: nowIso
+            })
+            .eq("id", job.id)
+            .eq("attempts", job.attempts);
+
+          const fallbackRes = await fallbackQuery.select();
+          updatedRows = fallbackRes.data;
+          claimError = fallbackRes.error;
+        }
 
         // If no row was returned, another worker claimed this job concurrently
         if (claimError || !updatedRows || updatedRows.length === 0) {
